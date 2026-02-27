@@ -1,4 +1,4 @@
-# Количество доменов: 467
+# Количество доменов: 480
 DOMAIN-SUFFIX,10minutemail.com
 DOMAIN-SUFFIX,1337x.to
 DOMAIN-SUFFIX,4pda.to
@@ -13,6 +13,7 @@ DOMAIN-SUFFIX,account.jetbrains.com
 DOMAIN-SUFFIX,account.protonmail.com
 DOMAIN-SUFFIX,accounts.spotify.com
 DOMAIN-SUFFIX,accounts.supercell.com
+DOMAIN-SUFFIX,adblockplus.org
 DOMAIN-SUFFIX,adguard.com
 DOMAIN-SUFFIX,afcs.dellcdn.com
 DOMAIN-SUFFIX,aftermarket.schaeffler.com
@@ -87,16 +88,19 @@ DOMAIN-SUFFIX,clamav.net
 DOMAIN-SUFFIX,claude.ai
 DOMAIN-SUFFIX,cloud.mongodb.com
 DOMAIN-SUFFIX,cloudflare-dns.com
+DOMAIN-SUFFIX,codeium.com
 DOMAIN-SUFFIX,colta.ru
 DOMAIN-SUFFIX,community.cisco.com
 DOMAIN-SUFFIX,coomer.su
 DOMAIN-SUFFIX,copilot-proxy.githubusercontent.com
+DOMAIN-SUFFIX,copilot-telemetry.githubusercontent.com
 DOMAIN-SUFFIX,crunchyroll.com
 DOMAIN-SUFFIX,cub.red
 DOMAIN-SUFFIX,czx.to
 DOMAIN-SUFFIX,d.docs.live.net
 DOMAIN-SUFFIX,data-cdn.mbamupdates.com
 DOMAIN-SUFFIX,database.clamav.net
+DOMAIN-SUFFIX,debian.map.fastlydns.net
 DOMAIN-SUFFIX,deepl.com
 DOMAIN-SUFFIX,deezer.com
 DOMAIN-SUFFIX,dell.com
@@ -142,6 +146,7 @@ DOMAIN-SUFFIX,fbsbx.com
 DOMAIN-SUFFIX,fex.net
 DOMAIN-SUFFIX,files.oaiusercontent.com
 DOMAIN-SUFFIX,firefly-ps.adobe.io
+DOMAIN-SUFFIX,fitgirl-repacks.site
 DOMAIN-SUFFIX,flashscore.com
 DOMAIN-SUFFIX,flibusta.is
 DOMAIN-SUFFIX,fluke.com
@@ -149,6 +154,7 @@ DOMAIN-SUFFIX,fork.pet
 DOMAIN-SUFFIX,forklog.com
 DOMAIN-SUFFIX,formula1.com
 DOMAIN-SUFFIX,forum.voynaplemyon.com
+DOMAIN-SUFFIX,freecodecamp.org
 DOMAIN-SUFFIX,fw-download.ubnt.com
 DOMAIN-SUFFIX,fw-update.ubnt.com
 DOMAIN-SUFFIX,gallery.zetalliance.org
@@ -158,6 +164,7 @@ DOMAIN-SUFFIX,geekyfuroshiki.com
 DOMAIN-SUFFIX,gemini.google.com
 DOMAIN-SUFFIX,geni.us
 DOMAIN-SUFFIX,genius.com
+DOMAIN-SUFFIX,githubcopilot.com
 DOMAIN-SUFFIX,gitlab.io
 DOMAIN-SUFFIX,gllto.glpals.com
 DOMAIN-SUFFIX,gnome-look.org
@@ -169,6 +176,7 @@ DOMAIN-SUFFIX,grazie.ai
 DOMAIN-SUFFIX,grok.com
 DOMAIN-SUFFIX,gulagu.net
 DOMAIN-SUFFIX,habr.com
+DOMAIN-SUFFIX,happycolorapp.com
 DOMAIN-SUFFIX,hd.zetfix.online
 DOMAIN-SUFFIX,hdkinoteatr.com
 DOMAIN-SUFFIX,hdrezka.fm
@@ -241,6 +249,7 @@ DOMAIN-SUFFIX,mouser.com
 DOMAIN-SUFFIX,mrakopedia.net
 DOMAIN-SUFFIX,my.atlassian.com
 DOMAIN-SUFFIX,myworld-portal.leica-geosystems.com
+DOMAIN-SUFFIX,naps2.com
 DOMAIN-SUFFIX,nasvsehtoshnit.ru
 DOMAIN-SUFFIX,navalny.com
 DOMAIN-SUFFIX,netapp.com
@@ -252,6 +261,7 @@ DOMAIN-SUFFIX,nih.gov
 DOMAIN-SUFFIX,nnmclub.to
 DOMAIN-SUFFIX,nordvpn.com
 DOMAIN-SUFFIX,notepad-plus-plus.org
+DOMAIN-SUFFIX,notion.com
 DOMAIN-SUFFIX,novayagazeta.eu
 DOMAIN-SUFFIX,novayagazeta.ru
 DOMAIN-SUFFIX,nsf.gov
@@ -273,6 +283,7 @@ DOMAIN-SUFFIX,packages.gitlab.com
 DOMAIN-SUFFIX,pages.dev
 DOMAIN-SUFFIX,pandasecurity.com
 DOMAIN-SUFFIX,paperpaper.ru
+DOMAIN-SUFFIX,parallels.com
 DOMAIN-SUFFIX,path3.xtracloud.net
 DOMAIN-SUFFIX,patreon.com
 DOMAIN-SUFFIX,pay.buckaroo.nl
@@ -283,6 +294,7 @@ DOMAIN-SUFFIX,pcbway.com
 DOMAIN-SUFFIX,pcbway.ru
 DOMAIN-SUFFIX,pepperl-fuchs.com
 DOMAIN-SUFFIX,phoenixcontact.com
+DOMAIN-SUFFIX,photopea.com
 DOMAIN-SUFFIX,php.su
 DOMAIN-SUFFIX,piccy.info
 DOMAIN-SUFFIX,pixabay.com
@@ -417,6 +429,7 @@ DOMAIN-SUFFIX,welt.de
 DOMAIN-SUFFIX,wetransfer.com
 DOMAIN-SUFFIX,wheather.com
 DOMAIN-SUFFIX,windguru.cz
+DOMAIN-SUFFIX,windsurf.com
 DOMAIN-SUFFIX,wixmp.com
 DOMAIN-SUFFIX,wunderground.com
 DOMAIN-SUFFIX,www.analog.com

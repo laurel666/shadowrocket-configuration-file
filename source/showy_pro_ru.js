@@ -3,7 +3,7 @@
 
     var Defined = {
         api: 'lampac',
-        localhost: 'http://my.lampac.host:8080/',
+        localhost: 'http://lampa.mx:8080/',
         apn: ''
     };
 
@@ -28,7 +28,7 @@
         }
     }
 
-    var hostkey = 'http://my.lampac.host:8080'.replace('http://', '').replace('https://', '');
+    var hostkey = 'http://lampa.mx:8080'.replace('http://', '').replace('https://', '');
 
     if (!window.rch_nws || !window.rch_nws[hostkey]) {
         if (!window.rch_nws) window.rch_nws = {};
@@ -53,7 +53,7 @@
             if (Lampa.Platform.is('android') || Lampa.Platform.is('tizen')) check(true);
             else {
                 var net = new Lampa.Reguest();
-                net.silent('http://my.lampac.host:8080'.indexOf(location.host) >= 0 ? 'https://github.com/' : host + '/cors/check', function () {
+                net.silent('http://lampa.mx:8080'.indexOf(location.host) >= 0 ? 'https://github.com/' : host + '/cors/check', function () {
                     check(true);
                 }, function () {
                     check(false);
@@ -65,7 +65,7 @@
     };
 
     window.rch_nws[hostkey].Registry = function RchRegistry(client, startConnection) {
-        window.rch_nws[hostkey].typeInvoke('http://my.lampac.host:8080', function () {
+        window.rch_nws[hostkey].typeInvoke('http://lampa.mx:8080', function () {
 
             client.invoke("RchRegistry", JSON.stringify({
                 version: 151,
@@ -95,7 +95,7 @@
 
                 function sendResult(uri, html) {
                     $.ajax({
-                        url: 'http://my.lampac.host:8080/rch/' + uri + '?id=' + rchId,
+                        url: 'http://lampa.mx:8080/rch/' + uri + '?id=' + rchId,
                         type: 'POST',
                         data: html,
                         async: true,
@@ -176,7 +176,7 @@
             });
         });
     };
-    window.rch_nws[hostkey].typeInvoke('http://my.lampac.host:8080', function () { });
+    window.rch_nws[hostkey].typeInvoke('http://lampa.mx:8080', function () { });
 
     function rchInvoke(json, call) {
         if (window.nwsClient && window.nwsClient[hostkey] && window.nwsClient[hostkey]._shouldReconnect) {
@@ -199,7 +199,7 @@
 
     function rchRun(json, call) {
         if (typeof NativeWsClient == 'undefined') {
-            Lampa.Utils.putScript(["http://my.lampac.host:8080/js/nws-client-es5.js?v18112025"], function () { }, false, function () {
+            Lampa.Utils.putScript(["http://lampa.mx:8080/js/nws-client-es5.js?v18112025"], function () { }, false, function () {
                 rchInvoke(json, call);
             }, true);
         } else {
@@ -261,7 +261,7 @@
 
         if (balansers_with_search == undefined) {
             network.timeout(10000);
-            network.silent(account('http://my.lampac.host:8080/lite/withsearch'), function (json) {
+            network.silent(account('http://lampa.mx:8080/lite/withsearch'), function (json) {
                 balansers_with_search = json;
             }, function () {
                 balansers_with_search = [];
@@ -795,7 +795,7 @@
                                     if (false) {
                                         if (Platform.is('browser') && location.host.indexOf("127.0.0.1") !== -1) {
                                             Noty.show('Р’РёРґРµРѕ РѕС‚РєСЂС‹С‚Рѕ РІ playerInner', { time: 3000 });
-                                            $.get('http://my.lampac.host:8080/player-inner/' + element.url);
+                                            $.get('http://lampa.mx:8080/player-inner/' + element.url);
                                             return;
                                         }
 

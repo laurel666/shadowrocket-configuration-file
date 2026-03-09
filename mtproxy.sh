@@ -1,89 +1,47 @@
 #!/bin/bash
-# GoTelegram MTProxy — refactored build.
-# Основано на пользовательской версии install.sh, с упрощением структуры bash-части
-# и сохранением исходной функциональности.
+# GoTelegram MTProxy — всё в одном файле.
+# Установка: curl -sL -H "Authorization: token TOKEN" https://raw.githubusercontent.com/anten-ka/gotelegram_pro/main/install.sh -o /usr/local/bin/gotelegram && chmod +x /usr/local/bin/gotelegram && gotelegram
 
-set -u
+# ── Цвета ────────────────────────────────────────────────────────────────────
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[1;33m'
+MAGENTA='\033[0;35m'
+BLUE='\033[0;34m'
+WHITE='\033[1;37m'
+NC='\033[0m'
 
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly CYAN='\033[0;36m'
-readonly YELLOW='\033[1;33m'
-readonly MAGENTA='\033[0;35m'
-readonly BLUE='\033[0;34m'
-readonly WHITE='\033[1;37m'
-readonly NC='\033[0m'
-
-readonly CONTAINER_NAME="mtproto-proxy"
-readonly BOT_DIR="/opt/gotelegram-bot"
-readonly SERVICE_NAME="gotelegram-bot"
-readonly SELF_INSTALL_PATH="/usr/local/bin/gotelegram"
-readonly DOCKER_IMAGE="nineseconds/mtg:2"
-readonly TIP_LINK="https://pay.cloudtips.ru/p/7410814f"
-readonly PROMO_LINK="https://vk.cc/ct29NQ"
-
+# ── Спиннер и прогресс-бар ────────────────────────────────────────────────────
 spin_pid=""
-
 spinner_start() {
   local msg="${1:-Подождите...}"
   (
     local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
     local i=0
     while true; do
-      printf "\r  ${CYAN}${frames[$i]}${NC} $msg" >&2
-      i=$(( (i + 1) % ${#frames[@]} ))
+      printf "\r  ${CYAN}${frames[$i]}${NC} ${msg}" >&2
+      i=$(( (i+1) % ${#frames[@]} ))
       sleep 0.12
     done
   ) &
   spin_pid=$!
 }
-
 spinner_stop() {
-  if [ -n "${spin_pid:-}" ]; then
-    kill "$spin_pid" 2>/dev/null || true
-    wait "$spin_pid" 2>/dev/null || true
-  fi
+  [ -n "$spin_pid" ] && kill "$spin_pid" 2>/dev/null && wait "$spin_pid" 2>/dev/null
   spin_pid=""
   printf "\r\033[K" >&2
 }
 
-trap spinner_stop EXIT INT TERM
-
-pause() {
-  read -r -p "${1:-Нажмите Enter...}"
-}
-
-clear_screen() {
-  command -v clear >/dev/null 2>&1 && clear || true
-}
-
-print_header() {
-  local color="$1"
-  local title="$2"
-  echo -e "${color}╔══════════════════════════════════════════════════════════════╗${NC}"
-  printf "%b║ %-60s ║%b\n" "$color" "$title" "$NC"
-  echo -e "${color}╚══════════════════════════════════════════════════════════════╝${NC}"
-}
-
-info() { echo -e "  ${CYAN}•${NC} $*"; }
-success() { echo -e "  ${GREEN}✓${NC} $*"; }
-warn() { echo -e "  ${YELLOW}!${NC} $*"; }
-error() { echo -e "  ${RED}✗${NC} $*"; }
-
 progress_bar() {
   local current="$1" total="$2" label="${3:-}"
-  local pct=0 filled=0 empty=50 i
-  if [ "$total" -gt 0 ]; then
-    pct=$(( current * 100 / total ))
-  fi
-  filled=$(( pct / 2 ))
-  empty=$(( 50 - filled ))
-
+  local pct=$(( current * 100 / total ))
+  local filled=$(( pct / 2 ))
+  local empty=$(( 50 - filled ))
   local bar=""
   for ((i=0; i<filled; i++)); do bar+="█"; done
   for ((i=0; i<empty; i++)); do bar+="░"; done
-
-  printf "\r  ${GREEN}[%s]${NC} %s%%%% %s" "$bar" "$pct" "$label" >&2
+  printf "\r  ${GREEN}[${bar}]${NC} ${pct}%% ${label}" >&2
   [ "$current" -eq "$total" ] && echo "" >&2
 }
 
@@ -94,93 +52,69 @@ run_with_progress() {
   local rc=$?
   spinner_stop
   if [ $rc -eq 0 ]; then
-    success "$label"
+    echo -e "  ${GREEN}✓${NC} $label"
   else
-    error "$label (ошибка)"
+    echo -e "  ${RED}✗${NC} $label ${RED}(ошибка)${NC}"
   fi
   return $rc
 }
 
-require_root() {
-  if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-    echo -e "${RED}Запустите с sudo / root.${NC}"
-    exit 1
-  fi
-}
+# ── Конфиг ───────────────────────────────────────────────────────────────────
+CONTAINER_NAME="mtproto-proxy"
+BOT_DIR="/opt/gotelegram-bot"
+SERVICE_NAME="gotelegram-bot"
+TIP_LINK="https://pay.cloudtips.ru/p/7410814f"
+PROMO_LINK="https://vk.cc/ct29NQ"
 
-command_exists() {
-  command -v "$1" >/dev/null 2>&1
-}
+# ── Проверка root ────────────────────────────────────────────────────────────
+if [ "$EUID" -ne 0 ]; then
+  echo -e "${RED}Запустите с sudo / root.${NC}"
+  exit 1
+fi
 
-detect_pkg_manager() {
-  if command_exists apt-get; then
-    echo apt-get
-  elif command_exists dnf; then
-    echo dnf
-  elif command_exists yum; then
-    echo yum
-  else
-    return 1
-  fi
-}
-
+# ── Установка пакетов ────────────────────────────────────────────────────────
 install_pkg() {
-  local pm
-  pm="$(detect_pkg_manager)" || {
-    echo "Нет поддерживаемого менеджера пакетов" >&2
-    return 1
-  }
-
-  case "$pm" in
-    apt-get)
-      apt-get update -qq || return $?
-      apt-get install -y -qq "$@" || return $?
-      ;;
-    dnf)
-      dnf install -y "$@" 2>/dev/null || return $?
-      ;;
-    yum)
-      yum install -y "$@" || return $?
-      ;;
-  esac
-}
-
-ensure_dir() {
-  mkdir -p "$1"
+  if command -v apt-get &>/dev/null; then
+    apt-get update -qq && apt-get install -y -qq "$@"
+  elif command -v dnf &>/dev/null; then
+    dnf install -y "$@" 2>/dev/null
+  elif command -v yum &>/dev/null; then
+    yum install -y "$@"
+  fi
 }
 
 install_base_deps() {
-  local steps=0 total=4
+  local steps=0 total=4 # curl, docker, qrencode, docker-start
 
-  progress_bar "$steps" "$total" "Проверка зависимостей..."
-  if ! command_exists curl; then
-    run_with_progress "Установка curl" install_pkg curl || return 1
+  progress_bar $steps $total "Проверка зависимостей..."
+  if ! command -v curl &>/dev/null; then
+    run_with_progress "Установка curl" install_pkg curl
   fi
-  steps=$((steps + 1)); progress_bar "$steps" "$total" "curl"
+  steps=$((steps+1)); progress_bar $steps $total "curl"
 
-  if ! command_exists docker; then
+  if ! command -v docker &>/dev/null; then
     spinner_start "Установка Docker (это может занять 1-2 минуты)..."
     curl -fsSL https://get.docker.com | sh >/dev/null 2>&1
-    local rc=$?
-    systemctl enable --now docker >/dev/null 2>&1 || true
+    systemctl enable --now docker >/dev/null 2>&1
     spinner_stop
-    [ $rc -eq 0 ] && success "Docker установлен" || { error "Не удалось установить Docker"; return 1; }
+    echo -e "  ${GREEN}✓${NC} Docker установлен"
   fi
-  steps=$((steps + 1)); progress_bar "$steps" "$total" "docker"
+  steps=$((steps+1)); progress_bar $steps $total "docker"
 
-  if ! command_exists qrencode; then
-    run_with_progress "Установка qrencode" install_pkg qrencode || return 1
+  if ! command -v qrencode &>/dev/null; then
+    run_with_progress "Установка qrencode" install_pkg qrencode
   fi
-  steps=$((steps + 1)); progress_bar "$steps" "$total" "qrencode"
+  steps=$((steps+1)); progress_bar $steps $total "qrencode"
 
-  if ! docker info >/dev/null 2>&1; then
+  if ! docker info &>/dev/null 2>&1; then
     systemctl start docker 2>/dev/null || true
     sleep 2
   fi
-  steps=$((steps + 1)); progress_bar "$steps" "$total" "Готово"
+  steps=$((steps+1)); progress_bar $steps $total "Готово"
   echo ""
 }
 
+# ── Утилиты ──────────────────────────────────────────────────────────────────
 get_ip() {
   local ip
   ip=$(curl -s -4 --max-time 5 https://api.ipify.org 2>/dev/null \
@@ -189,53 +123,18 @@ get_ip() {
   echo "$ip" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | head -1
 }
 
-json_escape() {
-  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\\"/g'
-}
-
-docker_running() {
-  docker info >/dev/null 2>&1
-}
-
-proxy_is_running() {
-  docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${CONTAINER_NAME}$"
-}
-
-get_proxy_secret() {
-  docker inspect "$CONTAINER_NAME" --format='{{range .Config.Cmd}}{{.}} {{end}}' 2>/dev/null | awk '{print $NF}'
-}
-
-get_proxy_port() {
-  docker inspect "$CONTAINER_NAME" --format='{{range $p,$c := .HostConfig.PortBindings}}{{(index $c 0).HostPort}} {{end}}' 2>/dev/null | awk '{print $1}'
-}
-
-show_containers() {
-  local list
-  list=$(docker ps --format "{{.Names}}\t{{.Image}}\t{{.Ports}}" 2>/dev/null | grep -v "^${CONTAINER_NAME}")
-  if [ -n "$list" ]; then
-    echo -e "${CYAN}  Другие контейнеры на сервере:${NC}"
-    while IFS= read -r line; do
-      echo "    $line"
-    done <<< "$list"
-  fi
-}
-
 check_port() {
   local port="$1"
-  local hp="" line=""
-
-  if proxy_is_running; then
-    hp="$(docker inspect "$CONTAINER_NAME" --format='{{range $p,$c := .HostConfig.PortBindings}}{{(index $c 0).HostPort}} {{end}}' 2>/dev/null)"
-    for p in $hp; do
-      [ "$p" = "$port" ] && return 1
-    done
+  # Если порт занят нашим контейнером — ОК
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${CONTAINER_NAME}$"; then
+    local hp
+    hp=$(docker inspect "$CONTAINER_NAME" --format='{{range $p,$c := .HostConfig.PortBindings}}{{(index $c 0).HostPort}} {{end}}' 2>/dev/null)
+    for p in $hp; do [ "$p" = "$port" ] && return 1; done
   fi
-
-  line="$(ss -tlnp 2>/dev/null | grep -E ":${port}\b" | head -1 || true)"
-  if [ -z "$line" ]; then
-    line="$(netstat -tlnp 2>/dev/null | grep -E ":${port}\b" | head -1 || true)"
-  fi
-
+  # Проверяем через ss или netstat
+  local line
+  line=$(ss -tlnp 2>/dev/null | grep -E ":${port}\b" | head -1)
+  [ -z "$line" ] && line=$(netstat -tlnp 2>/dev/null | grep -E ":${port}\b" | head -1)
   if [ -n "$line" ]; then
     echo "$line"
     return 0
@@ -243,49 +142,57 @@ check_port() {
   return 1
 }
 
-ensure_self_installed() {
-  local self
-  self="$(realpath "$0")"
-  if [ "$self" != "$SELF_INSTALL_PATH" ]; then
-    cp "$self" "$SELF_INSTALL_PATH" && chmod +x "$SELF_INSTALL_PATH"
+show_containers() {
+  local list
+  list=$(docker ps --format "{{.Names}}\t{{.Image}}\t{{.Ports}}" 2>/dev/null | grep -v "^${CONTAINER_NAME}")
+  if [ -n "$list" ]; then
+    echo -e "${CYAN}  Другие контейнеры на сервере:${NC}"
+    echo "$list" | while IFS= read -r l; do echo "    $l"; done
   fi
 }
 
+proxy_is_running() {
+  docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${CONTAINER_NAME}$"
+}
+
+# ── Показать данные подключения ──────────────────────────────────────────────
 show_config() {
   if ! proxy_is_running; then
     echo -e "${RED}Прокси не запущен! Выберите пункт 1 для установки.${NC}"
-    return 1
+    return
   fi
-
-  local secret ip port link
-  secret="$(get_proxy_secret)"
-  ip="$(get_ip)"
-  port="$(get_proxy_port)"
-  port="${port:-443}"
-  link="tg://proxy?server=${ip}&port=${port}&secret=${secret}"
+  local SECRET IP PORT LINK
+  SECRET=$(docker inspect "$CONTAINER_NAME" --format='{{range .Config.Cmd}}{{.}} {{end}}' 2>/dev/null | awk '{print $NF}')
+  IP=$(get_ip)
+  PORT=$(docker inspect "$CONTAINER_NAME" --format='{{range $p,$c := .HostConfig.PortBindings}}{{(index $c 0).HostPort}} {{end}}' 2>/dev/null | awk '{print $1}')
+  PORT=${PORT:-443}
+  LINK="tg://proxy?server=$IP&port=$PORT&secret=$SECRET"
 
   echo ""
-  print_header "$GREEN" "ДАННЫЕ ПОДКЛЮЧЕНИЯ"
-  echo -e "  IP:     ${WHITE}${ip}${NC}"
-  echo -e "  Port:   ${WHITE}${port}${NC} (TCP + UDP)"
-  echo -e "  Secret: ${WHITE}${secret}${NC}"
+  echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${GREEN}║                   ДАННЫЕ ПОДКЛЮЧЕНИЯ                         ║${NC}"
+  echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
+  echo -e "  IP:     ${WHITE}$IP${NC}"
+  echo -e "  Port:   ${WHITE}$PORT${NC} (TCP + UDP)"
+  echo -e "  Secret: ${WHITE}$SECRET${NC}"
   echo ""
-  echo -e "  Ссылка: ${BLUE}${link}${NC}"
+  echo -e "  Ссылка: ${BLUE}$LINK${NC}"
   echo ""
-
-  if command_exists qrencode; then
+  if command -v qrencode &>/dev/null; then
     echo -e "${CYAN}  Наведите камеру телефона на QR-код для подключения:${NC}"
     echo ""
-    qrencode -t ANSIUTF8 "$link"
+    qrencode -t ANSIUTF8 "$LINK"
   fi
-
   echo ""
   show_containers
 }
 
+# ── ПРОМО ────────────────────────────────────────────────────────────────────
 show_promo() {
-  clear_screen
-  print_header "$MAGENTA" "ХОСТИНГ СО СКИДКОЙ ДО -60% ОТ ANTEN-KA"
+  clear
+  echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${MAGENTA}║          ХОСТИНГ СО СКИДКОЙ ДО -60% ОТ ANTEN-KA            ║${NC}"
+  echo -e "${MAGENTA}╚══════════════════════════════════════════════════════════════╝${NC}"
   echo ""
   echo -e "${CYAN} Хостинг #1: $PROMO_LINK ${NC}"
   echo -e "${MAGENTA}❖ ••••••••••••••••••• АКТУАЛЬНЫЕ ПРОМОКОДЫ •••••••••••••••••• ❖${NC}"
@@ -294,19 +201,28 @@ show_promo() {
   printf "  ${YELLOW}%-12s${NC} : ${WHITE}%s${NC}\n" "antenka6" "Буст 15% + 5% (оплата за 6 МЕС)"
   printf "  ${YELLOW}%-12s${NC} : ${WHITE}%s${NC}\n" "antenka12" "Буст 5% + 5% (оплата за 12 МЕС)"
   echo -e "${MAGENTA}❖ •••••••••••••••••••••••••••••••••••••••••••••••••••••••••••• ❖${NC}"
-  command_exists qrencode && qrencode -t ANSIUTF8 "$PROMO_LINK"
-
+  if command -v qrencode &>/dev/null; then
+    qrencode -t ANSIUTF8 "$PROMO_LINK"
+  fi
   echo ""
   echo -e "${CYAN} Хостинг #2: https://vk.cc/cUxAhj ${NC}"
   echo -e "${MAGENTA}❖ ••••••••••••••••••• АКТУАЛЬНЫЕ ПРОМОКОДЫ •••••••••••••••••• ❖${NC}"
   printf "  ${YELLOW}%-12s${NC} : ${WHITE}%s${NC}\n" "OFF60" "Скидка 60% на ПЕРВЫЙ МЕСЯЦ"
   echo -e "${MAGENTA}❖ •••••••••••••••••••••••••••••••••••••••••••••••••••••••••••• ❖${NC}"
-  command_exists qrencode && qrencode -t ANSIUTF8 "https://vk.cc/cUxAhj"
+  if command -v qrencode &>/dev/null; then
+    qrencode -t ANSIUTF8 "https://vk.cc/cUxAhj"
+  fi
   echo "--------------------------------------------------------------"
-  pause "Нажмите [ENTER] для возврата в меню..."
+  read -p "Нажмите [ENTER] для возврата в меню..."
 }
 
-choose_domain() {
+# ── 1) Установить / Обновить MTProxy ─────────────────────────────────────────
+menu_install() {
+  clear
+  echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${CYAN}║       Выберите домен для маскировки (Fake TLS)              ║${NC}"
+  echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
+
   local domains=(
     "google.com" "wikipedia.org" "habr.com" "github.com"
     "coursera.org" "udemy.com" "medium.com" "stackoverflow.com"
@@ -314,182 +230,345 @@ choose_domain() {
     "lenta.ru" "rbc.ru" "ria.ru" "kommersant.ru"
     "stepik.org" "duolingo.com" "khanacademy.org" "ted.com"
   )
-  local idx domain
-
-  clear_screen
-  print_header "$CYAN" "Выберите домен для маскировки (Fake TLS)"
 
   for i in "${!domains[@]}"; do
-    printf "  ${YELLOW}%2d)${NC} %-22s" "$((i + 1))" "${domains[$i]}"
-    [[ $(( (i + 1) % 2 )) -eq 0 ]] && echo ""
+    printf "  ${YELLOW}%2d)${NC} %-22s" "$((i+1))" "${domains[$i]}"
+    [[ $(( (i+1) % 2 )) -eq 0 ]] && echo ""
   done
   echo ""
   echo -e "  ${CYAN}21)${NC} Ввести свой домен"
   echo ""
 
-  read -r -p "Ваш выбор [1-21]: " idx
-  if [ "$idx" = "21" ]; then
-    read -r -p "  Введите домен (например, example.com): " domain
-    domain="$(echo "$domain" | tr -d '[:space:]')"
-    if ! echo "$domain" | grep -qE '^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'; then
-      warn "Некорректный домен. Используется google.com"
-      domain="google.com"
+  local d_idx DOMAIN
+  read -p "Ваш выбор [1-21]: " d_idx
+  if [ "$d_idx" = "21" ]; then
+    read -p "  Введите домен (например, example.com): " DOMAIN
+    DOMAIN=$(echo "$DOMAIN" | tr -d '[:space:]')
+    if [ -z "$DOMAIN" ] || ! echo "$DOMAIN" | grep -qE '\.'; then
+      echo -e "  ${RED}Некорректный домен. Используется google.com${NC}"
+      DOMAIN="google.com"
     fi
   else
-    domain="${domains[$((idx - 1))]:-google.com}"
+    DOMAIN=${domains[$((d_idx-1))]}
+    DOMAIN=${DOMAIN:-google.com}
   fi
+  echo -e "  Домен: ${GREEN}$DOMAIN${NC}"
 
-  printf '%s\n' "$domain"
-}
-
-choose_port() {
-  local port_choice port busy_line force_choice
-
+  # ── Выбор порта с проверкой занятости ────────────────────────────────────
   echo ""
   echo -e "${CYAN}--- Выберите порт ---${NC}"
 
+  local busy_line
   echo -n "  1) 443  (Рекомендуется) "
-  if busy_line="$(check_port 443)"; then
+  if busy_line=$(check_port 443); then
     echo -e "${RED}[ЗАНЯТ: $busy_line]${NC}"
   else
     echo -e "${GREEN}[свободен]${NC}"
   fi
 
   echo -n "  2) 8443                 "
-  if busy_line="$(check_port 8443)"; then
+  if busy_line=$(check_port 8443); then
     echo -e "${RED}[ЗАНЯТ: $busy_line]${NC}"
   else
     echo -e "${GREEN}[свободен]${NC}"
   fi
 
   echo -e "  3) Свой порт"
-  read -r -p "  Выбор: " port_choice
 
-  case "$port_choice" in
-    2) port=8443 ;;
+  local p_choice PORT
+  read -p "  Выбор: " p_choice
+  case $p_choice in
+    2) PORT=8443 ;;
     3)
       while true; do
-        read -r -p "  Введите порт (1-65535): " port
-        [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )) && break
+        read -p "  Введите порт (1-65535): " PORT
+        [[ "$PORT" =~ ^[0-9]+$ ]] && (( PORT >= 1 && PORT <= 65535 )) && break
         echo -e "  ${RED}Неверный порт.${NC}"
       done
       ;;
-    *) port=443 ;;
+    *) PORT=443 ;;
   esac
 
-  if busy_line="$(check_port "$port")"; then
+  # Финальная проверка выбранного порта
+  if busy_line=$(check_port "$PORT"); then
     echo ""
-    echo -e "  ${YELLOW}Порт $port занят:${NC}"
+    echo -e "  ${YELLOW}Порт $PORT занят:${NC}"
     echo -e "  ${RED}$busy_line${NC}"
     echo -e "  1) Всё равно использовать (если это ваш процесс)"
     echo -e "  2) Отмена"
-    read -r -p "  Выбор: " force_choice
+    local force_choice
+    read -p "  Выбор: " force_choice
     if [ "$force_choice" != "1" ]; then
       echo -e "  ${YELLOW}Отменено.${NC}"
-      return 1
+      read -p "  Нажмите Enter..."
+      return
     fi
   fi
 
-  printf '%s\n' "$port"
-}
-
-install_proxy() {
-  local domain="$1"
-  local port="$2"
-  local secret install_steps=5 install_cur=0
-
   echo ""
-  echo -e "${YELLOW}[*] Настройка прокси (домен: $domain, порт: $port)...${NC}"
+  echo -e "${YELLOW}[*] Настройка прокси (домен: $DOMAIN, порт: $PORT)...${NC}"
   echo ""
 
-  if ! docker_running; then
+  # Docker проверка
+  if ! docker info &>/dev/null 2>&1; then
     echo -e "${RED}Docker не запущен!${NC}"
-    return 1
+    read -p "Нажмите Enter..."
+    return
   fi
 
-  install_cur=$((install_cur + 1)); progress_bar "$install_cur" "$install_steps" "Загрузка образа mtg..."
+  local SECRET install_steps=5 install_cur=0
+
+  # Шаг 1: pull образа (всегда проверяем/обновляем)
+  install_cur=$((install_cur+1)); progress_bar $install_cur $install_steps "Загрузка образа mtg..."
   spinner_start "Загрузка Docker-образа mtg..."
-  if ! docker pull "$DOCKER_IMAGE" >/dev/null 2>&1; then
-    spinner_stop
-    error "Не удалось загрузить образ mtg. Проверьте интернет."
-    return 1
-  fi
+  docker pull nineseconds/mtg:2 >/dev/null 2>&1
   spinner_stop
-  success "Образ mtg готов"
+  if ! docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep -q "nineseconds/mtg"; then
+    echo -e "  ${RED}✗${NC} Не удалось загрузить образ mtg. Проверьте интернет."
+    read -p "Нажмите Enter..."
+    return
+  fi
+  echo -e "  ${GREEN}✓${NC} Образ mtg готов"
 
-  install_cur=$((install_cur + 1)); progress_bar "$install_cur" "$install_steps" "Генерация secret..."
-  spinner_start "Генерация secret для $domain..."
-  secret="$(docker run --rm "$DOCKER_IMAGE" generate-secret --hex "$domain" 2>&1)"
+  # Шаг 2: генерация secret
+  install_cur=$((install_cur+1)); progress_bar $install_cur $install_steps "Генерация secret..."
+  spinner_start "Генерация secret для $DOMAIN..."
+  SECRET=$(docker run --rm nineseconds/mtg:2 generate-secret --hex "$DOMAIN" 2>&1)
   local secret_rc=$?
   spinner_stop
-  if [ $secret_rc -ne 0 ] || [ -z "$secret" ]; then
-    error "Ошибка генерации secret."
-    [ -n "$secret" ] && echo -e "  ${RED}$secret${NC}"
-    return 1
+  if [ $secret_rc -ne 0 ] || [ -z "$SECRET" ]; then
+    echo -e "  ${RED}✗${NC} Ошибка генерации secret."
+    [ -n "$SECRET" ] && echo -e "  ${RED}$SECRET${NC}"
+    read -p "Нажмите Enter..."
+    return
   fi
-  success "Secret сгенерирован"
+  echo -e "  ${GREEN}✓${NC} Secret сгенерирован"
 
-  install_cur=$((install_cur + 1)); progress_bar "$install_cur" "$install_steps" "Очистка..."
-  docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
-  docker rm "$CONTAINER_NAME" >/dev/null 2>&1 || true
-  success "Старый контейнер удалён"
+  # Шаг 3: остановка старого
+  install_cur=$((install_cur+1)); progress_bar $install_cur $install_steps "Очистка..."
+  docker stop "$CONTAINER_NAME" &>/dev/null
+  docker rm "$CONTAINER_NAME" &>/dev/null
+  echo -e "  ${GREEN}✓${NC} Старый контейнер удалён"
 
-  install_cur=$((install_cur + 1)); progress_bar "$install_cur" "$install_steps" "Запуск контейнера..."
+  # Шаг 4: запуск нового
+  install_cur=$((install_cur+1)); progress_bar $install_cur $install_steps "Запуск контейнера..."
   spinner_start "Запуск MTProxy (TCP + UDP)..."
   docker run -d --name "$CONTAINER_NAME" --restart always \
-    -p "$port:$port/tcp" \
-    -p "$port:$port/udp" \
-    "$DOCKER_IMAGE" simple-run \
+    -p "$PORT":"$PORT"/tcp \
+    -p "$PORT":"$PORT"/udp \
+    nineseconds/mtg:2 simple-run \
     -n 1.1.1.1 -i prefer-ipv4 \
-    "0.0.0.0:$port" "$secret" >/dev/null 2>&1
+    0.0.0.0:"$PORT" "$SECRET" > /dev/null 2>&1
   sleep 2
   spinner_stop
 
   if ! proxy_is_running; then
-    error "Контейнер не запустился. Проверьте: docker logs $CONTAINER_NAME"
-    return 1
+    echo -e "  ${RED}✗${NC} Контейнер не запустился. Проверьте: docker logs $CONTAINER_NAME"
+    read -p "Нажмите Enter..."
+    return
   fi
-  success "Контейнер запущен"
+  echo -e "  ${GREEN}✓${NC} Контейнер запущен"
 
-  install_cur=$((install_cur + 1)); progress_bar "$install_cur" "$install_steps" "Готово!"
-  ensure_dir "$BOT_DIR"
-  cat > "$BOT_DIR/proxy.json" <<CFGEOF
-{"domain":"$(json_escape "$domain")","port":"$port","secret":"$(json_escape "$secret")"}
+  # Шаг 5: сохранение
+  install_cur=$((install_cur+1)); progress_bar $install_cur $install_steps "Готово!"
+  mkdir -p "$BOT_DIR"
+  cat > "$BOT_DIR/proxy.json" << CFGEOF
+{"domain": "$DOMAIN", "port": "$PORT", "secret": "$SECRET"}
 CFGEOF
-  chmod 600 "$BOT_DIR/proxy.json"
 
   echo ""
   echo -e "${GREEN}══════════════════════════════════════════════════${NC}"
   echo -e "${GREEN}  Прокси установлен! (TCP + UDP, звонки поддержаны)${NC}"
   echo -e "${GREEN}══════════════════════════════════════════════════${NC}"
   show_config
+  read -p "Нажмите Enter для возврата в меню..."
 }
 
-menu_install() {
-  local domain port
-  domain="$(choose_domain)"
-  echo -e "  Домен: ${GREEN}$domain${NC}"
+# ── 3) Настроить Telegram-бот ─────────────────────────────────────────────────
+menu_setup_bot() {
+  clear
+  echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${CYAN}║            Настройка Telegram-бота                          ║${NC}"
+  echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
 
-  if ! port="$(choose_port)"; then
-    pause "  Нажмите Enter..."
+  # Проверка статуса
+  if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+    echo -e "  Статус бота: ${GREEN}работает${NC}"
+    echo ""
+    # Показываем текущие настройки
+    local cur_ids
+    cur_ids=$(grep "^ALLOWED_IDS=" "$BOT_DIR/.env" 2>/dev/null | cut -d= -f2)
+    if [ -n "$cur_ids" ]; then
+      echo -e "  Администратор(ы): ${WHITE}$cur_ids${NC}"
+    else
+      echo -e "  Администратор: ${YELLOW}не задан (бот доступен всем)${NC}"
+    fi
+    echo ""
+    echo -e "  1) Обновить файлы бота и перезапустить"
+    echo -e "  2) Изменить BOT_TOKEN"
+    echo -e "  3) Изменить администратора (ALLOWED_IDS)"
+    echo -e "  4) Остановить бота"
+    echo -e "  0) Назад"
+    local sub
+    read -p "  Выбор: " sub
+    case $sub in
+      1)
+        write_bot_files
+        install_bot_deps
+        systemctl restart "$SERVICE_NAME"
+        echo -e "${GREEN}[*] Бот обновлён и перезапущен.${NC}"
+        ;;
+      2)
+        echo -e "${YELLOW}Введите новый BOT_TOKEN:${NC}"
+        local tok
+        read -r tok
+        tok=$(echo "$tok" | tr -d '[:space:]')
+        if [ -n "$tok" ]; then
+          sed -i "s/^BOT_TOKEN=.*/BOT_TOKEN=$tok/" "$BOT_DIR/.env"
+          chmod 600 "$BOT_DIR/.env"
+          systemctl restart "$SERVICE_NAME"
+          echo -e "${GREEN}[*] Токен обновлён, бот перезапущен.${NC}"
+        else
+          echo -e "${RED}Пустой токен, отмена.${NC}"
+        fi
+        ;;
+      3)
+        echo -e "${YELLOW}Введите Telegram ID администратора (или несколько через запятую):${NC}"
+        echo -e "  ${CYAN}Узнать ID: @userinfobot, @getmyid_bot или @RawDataBot${NC}"
+        echo -e "  ${CYAN}Оставьте пустым — бот будет доступен всем.${NC}"
+        local new_ids
+        read -r new_ids
+        new_ids=$(echo "$new_ids" | tr -d '[:space:]')
+        # Удаляем старую строку ALLOWED_IDS
+        sed -i "/^ALLOWED_IDS=/d" "$BOT_DIR/.env"
+        if [ -n "$new_ids" ]; then
+          echo "ALLOWED_IDS=$new_ids" >> "$BOT_DIR/.env"
+          echo -e "${GREEN}[*] Администратор(ы): $new_ids. Перезапуск...${NC}"
+        else
+          echo -e "${GREEN}[*] Ограничение снято, бот доступен всем. Перезапуск...${NC}"
+        fi
+        systemctl restart "$SERVICE_NAME"
+        ;;
+      4)
+        systemctl stop "$SERVICE_NAME"
+        echo -e "${YELLOW}Бот остановлен.${NC}"
+        ;;
+      *) return ;;
+    esac
+    read -p "Нажмите Enter..."
     return
   fi
 
-  if install_proxy "$domain" "$port"; then
-    pause "Нажмите Enter для возврата в меню..."
-  else
-    pause "Нажмите Enter..."
+  echo -e "  Статус бота: ${RED}не установлен / не запущен${NC}"
+  echo ""
+  echo -e "  Бот позволяет управлять MTProxy из Telegram:"
+  echo -e "  установка, статус, ссылка, поделиться ключом и т.д."
+  echo ""
+  read -p "  Установить бота? (y/n): " yn
+  [ "$yn" != "y" ] && [ "$yn" != "Y" ] && return
+
+  # Зависимости Python
+  echo -e "${GREEN}[*] Проверка Python...${NC}"
+  if ! command -v python3 &>/dev/null; then
+    install_pkg python3 python3-pip
   fi
+  command -v python3 &>/dev/null || { echo -e "${RED}python3 не найден!${NC}"; read -p "Enter..."; return; }
+
+  local PY_VER
+  PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "3")
+  if ! python3 -m venv --help &>/dev/null 2>&1; then
+    echo -e "${YELLOW}[*] Установка python${PY_VER}-venv...${NC}"
+    install_pkg "python${PY_VER}-venv" 2>/dev/null
+    install_pkg python3-venv 2>/dev/null
+    install_pkg python3-pip 2>/dev/null
+    python3 -m venv --help &>/dev/null 2>&1 || {
+      echo -e "${RED}Не удалось установить venv. Выполните: apt install python${PY_VER}-venv${NC}"
+      read -p "Enter..."; return
+    }
+  fi
+
+  # Файлы бота
+  write_bot_files
+
+  # venv + pip
+  install_bot_deps
+
+  # BOT_TOKEN + ALLOWED_IDS
+  if [ ! -f "$BOT_DIR/.env" ]; then
+    echo ""
+    echo -e "${YELLOW}Введите BOT_TOKEN от @BotFather:${NC}"
+    echo -e "  ${CYAN}(Откройте @BotFather в Telegram → /newbot → скопируйте токен)${NC}"
+    local TOKEN=""
+    while [ -z "$TOKEN" ]; do
+      read -r TOKEN
+      TOKEN=$(echo "$TOKEN" | tr -d '[:space:]')
+      [ -z "$TOKEN" ] && echo -e "${RED}Токен не может быть пустым.${NC}"
+    done
+
+    echo ""
+    echo -e "${YELLOW}Введите ваш Telegram ID (администратор бота):${NC}"
+    echo -e "  ${CYAN}Как узнать свой ID:${NC}"
+    echo -e "    • Бот ${WHITE}@userinfobot${NC} — напишите ему /start"
+    echo -e "    • Бот ${WHITE}@getmyid_bot${NC} — напишите ему /start"
+    echo -e "    • Бот ${WHITE}@RawDataBot${NC} — напишите ему /start"
+    echo -e "  ${CYAN}Можно указать несколько через запятую: 123456,789012${NC}"
+    echo -e "  ${CYAN}Оставьте пустым, чтобы бот был доступен всем.${NC}"
+    local ADMIN_IDS=""
+    read -r ADMIN_IDS
+    ADMIN_IDS=$(echo "$ADMIN_IDS" | tr -d '[:space:]')
+
+    {
+      echo "BOT_TOKEN=$TOKEN"
+      [ -n "$ADMIN_IDS" ] && echo "ALLOWED_IDS=$ADMIN_IDS"
+    } > "$BOT_DIR/.env"
+    chmod 600 "$BOT_DIR/.env"
+
+    if [ -n "$ADMIN_IDS" ]; then
+      echo -e "${GREEN}[*] .env создан. Администратор(ы): $ADMIN_IDS${NC}"
+    else
+      echo -e "${GREEN}[*] .env создан. Бот доступен всем пользователям.${NC}"
+    fi
+  else
+    echo -e "${GREEN}[*] .env уже есть — используем существующий.${NC}"
+  fi
+
+  # systemd
+  cat > "/etc/systemd/system/${SERVICE_NAME}.service" << EOF
+[Unit]
+Description=GoTelegram MTProxy Bot
+After=network.target docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=$BOT_DIR
+ExecStart=$BOT_DIR/venv/bin/python $BOT_DIR/bot.py
+Restart=always
+RestartSec=5
+Environment=PATH=$BOT_DIR/venv/bin:/usr/bin:/usr/local/bin
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable "$SERVICE_NAME" 2>/dev/null
+  systemctl restart "$SERVICE_NAME" 2>/dev/null || systemctl start "$SERVICE_NAME"
+
+  echo ""
+  echo -e "${GREEN}[*] Telegram-бот установлен и запущен!${NC}"
+  echo -e "  Проверка: systemctl status $SERVICE_NAME"
+  echo -e "  Логи:     journalctl -u $SERVICE_NAME -f"
+  read -p "  Нажмите Enter..."
 }
 
 write_bot_files() {
-  ensure_dir "$BOT_DIR"
+  mkdir -p "$BOT_DIR"
 
-  cat > "$BOT_DIR/requirements.txt" <<'REQEOF'
+  cat > "$BOT_DIR/requirements.txt" << 'REQEOF'
 python-telegram-bot>=21.0
 REQEOF
 
-  cat > "$BOT_DIR/bot.py" <<'BOTEOF'
+  cat > "$BOT_DIR/bot.py" << 'BOTEOF'
 #!/usr/bin/env python3
 import asyncio, html, json, os, re
 from pathlib import Path
@@ -520,6 +599,8 @@ DOMAINS = [
     "lenta.ru","rbc.ru","ria.ru","kommersant.ru",
     "stepik.org","duolingo.com","khanacademy.org","ted.com",
 ]
+PROMO_LINK = "https://vk.cc/ct29NQ"
+TIP_LINK = "https://pay.cloudtips.ru/p/7410814f"
 
 def _ok(uid):
     return ALLOWED_IDS is None or uid in ALLOWED_IDS
@@ -732,6 +813,22 @@ async def cmd_logs(update, ctx):
     else:
         await msg.reply_text(f"<pre>{html.escape(text)}</pre>", parse_mode="HTML", reply_markup=kb)
 
+async def cmd_promo(update, ctx):
+    msg = update.message or (update.callback_query and update.callback_query.message)
+    if not update.effective_user or not msg: return
+    if not _ok(update.effective_user.id): return
+    text = ("💰 <b>Хостинг со скидкой до -60%</b>\n\n"
+        f"<b>Хостинг #1:</b> {PROMO_LINK}\n"
+        "Промокоды: OFF60, antenka20, antenka6, antenka12\n\n"
+        "<b>Хостинг #2:</b> https://vk.cc/cUxAhj\n"
+        "Промокод: OFF60\n\n"
+        f"☕ Донат: {TIP_LINK}")
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Меню", callback_data="menu_main")]])
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+    else:
+        await msg.reply_text(text, parse_mode="HTML", reply_markup=kb)
+
 async def install_step_domain(update, ctx):
     msg = update.message or (update.callback_query and update.callback_query.message)
     if not update.effective_user or not msg: return
@@ -877,6 +974,7 @@ def main():
     app.add_handler(CommandHandler("remove", cmd_remove))
     app.add_handler(CommandHandler("restart", cmd_restart))
     app.add_handler(CommandHandler("logs", cmd_logs))
+    app.add_handler(CommandHandler("promo", cmd_promo))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     app.run_polling(allowed_updates=Update.ALL_TYPES)
@@ -887,318 +985,155 @@ BOTEOF
 }
 
 install_bot_deps() {
-  local bot_steps=3 bot_cur=0 py_ver
+  local bot_steps=3 bot_cur=0
 
-  bot_cur=$((bot_cur + 1)); progress_bar "$bot_cur" "$bot_steps" "Создание venv..."
+  bot_cur=$((bot_cur+1)); progress_bar $bot_cur $bot_steps "Создание venv..."
 
+  # Если venv сломан (нет pip), удаляем и пересоздаём
   if [ -d "$BOT_DIR/venv" ] && [ ! -f "$BOT_DIR/venv/bin/pip" ]; then
-    warn "venv повреждён (нет pip), пересоздаю..."
+    echo -e "  ${YELLOW}!${NC} venv повреждён (нет pip), пересоздаю..."
     rm -rf "$BOT_DIR/venv"
   fi
 
   if [ ! -d "$BOT_DIR/venv" ]; then
-    if ! python3 -m ensurepip --version >/dev/null 2>&1; then
-      py_ver="$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "3")"
-      warn "Установка python${py_ver}-venv (с ensurepip)..."
-      install_pkg "python${py_ver}-venv" >/dev/null 2>&1 || true
-      install_pkg python3-venv python3-pip >/dev/null 2>&1 || true
+    # Убеждаемся что ensurepip доступен
+    if ! python3 -m ensurepip --version &>/dev/null; then
+      local PY_VER
+      PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "3")
+      echo -e "  ${YELLOW}!${NC} Установка python${PY_VER}-venv (с ensurepip)..."
+      install_pkg "python${PY_VER}-venv" 2>/dev/null
+      install_pkg python3-venv python3-pip 2>/dev/null
     fi
-
     spinner_start "Создание Python venv..."
-    python3 -m venv "$BOT_DIR/venv" >/dev/null 2>&1
+    python3 -m venv "$BOT_DIR/venv" 2>/dev/null
     spinner_stop
-
     if [ ! -f "$BOT_DIR/venv/bin/pip" ]; then
-      error "venv создан, но pip отсутствует."
+      echo -e "  ${RED}✗${NC} venv создан, но pip отсутствует."
       echo -e "  ${YELLOW}Выполните вручную: apt install python3-venv && rm -rf $BOT_DIR/venv${NC}"
       return 1
     fi
   fi
-  success "Python venv готов"
+  echo -e "  ${GREEN}✓${NC} Python venv готов"
 
-  bot_cur=$((bot_cur + 1)); progress_bar "$bot_cur" "$bot_steps" "Обновление pip..."
+  bot_cur=$((bot_cur+1)); progress_bar $bot_cur $bot_steps "Обновление pip..."
   spinner_start "Обновление pip..."
-  "$BOT_DIR/venv/bin/pip" install --upgrade pip -q >/dev/null 2>&1
+  "$BOT_DIR/venv/bin/pip" install --upgrade pip -q 2>/dev/null
   spinner_stop
-  success "pip обновлён"
+  echo -e "  ${GREEN}✓${NC} pip обновлён"
 
-  bot_cur=$((bot_cur + 1)); progress_bar "$bot_cur" "$bot_steps" "Установка зависимостей..."
+  bot_cur=$((bot_cur+1)); progress_bar $bot_cur $bot_steps "Установка зависимостей..."
   spinner_start "Установка python-telegram-bot (до 1 мин)..."
-  "$BOT_DIR/venv/bin/pip" install -r "$BOT_DIR/requirements.txt" -q >/dev/null 2>&1
+  "$BOT_DIR/venv/bin/pip" install -r "$BOT_DIR/requirements.txt" -q 2>/dev/null
   local rc=$?
   spinner_stop
   if [ $rc -ne 0 ]; then
-    error "pip install не удался."
+    echo -e "  ${RED}✗${NC} pip install не удался."
     return 1
   fi
-  if ! "$BOT_DIR/venv/bin/python" -c "import telegram" >/dev/null 2>&1; then
-    error "Модуль telegram не найден после установки."
+  # Проверяем что модуль реально доступен
+  if ! "$BOT_DIR/venv/bin/python" -c "import telegram" 2>/dev/null; then
+    echo -e "  ${RED}✗${NC} Модуль telegram не найден после установки."
     return 1
   fi
-  success "Зависимости установлены"
+  echo -e "  ${GREEN}✓${NC} Зависимости установлены"
 }
 
-write_env_file() {
-  local token="$1"
-  local admin_ids="$2"
-  {
-    echo "BOT_TOKEN=$token"
-    [ -n "$admin_ids" ] && echo "ALLOWED_IDS=$admin_ids"
-  } > "$BOT_DIR/.env"
-  chmod 600 "$BOT_DIR/.env"
-}
-
-install_or_update_systemd_service() {
-  cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
-[Unit]
-Description=GoTelegram MTProxy Bot
-After=network.target docker.service
-
-[Service]
-Type=simple
-WorkingDirectory=$BOT_DIR
-ExecStart=$BOT_DIR/venv/bin/python $BOT_DIR/bot.py
-Restart=always
-RestartSec=5
-Environment=PATH=$BOT_DIR/venv/bin:/usr/bin:/usr/local/bin
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-  systemctl daemon-reload
-  systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
-  systemctl restart "$SERVICE_NAME" >/dev/null 2>&1 || systemctl start "$SERVICE_NAME" >/dev/null 2>&1
-}
-
-bot_is_active() {
-  systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null
-}
-
-read_admin_ids_prompt() {
-  local admin_ids=""
-  echo -e "${YELLOW}Введите ваш Telegram ID (администратор бота):${NC}"
-  echo -e "  ${CYAN}Как узнать свой ID:${NC}"
-  echo -e "    • Бот ${WHITE}@userinfobot${NC} — напишите ему /start"
-  echo -e "    • Бот ${WHITE}@getmyid_bot${NC} — напишите ему /start"
-  echo -e "    • Бот ${WHITE}@RawDataBot${NC} — напишите ему /start"
-  echo -e "  ${CYAN}Можно указать несколько через запятую: 123456,789012${NC}"
-  echo -e "  ${CYAN}Оставьте пустым, чтобы бот был доступен всем.${NC}"
-  read -r admin_ids
-  admin_ids="$(echo "$admin_ids" | tr -d '[:space:]')"
-  printf '%s\n' "$admin_ids"
-}
-
-menu_setup_bot() {
-  local cur_ids sub tok new_ids token admin_ids py_ver
-
-  clear_screen
-  print_header "$CYAN" "Настройка Telegram-бота"
-
-  if bot_is_active; then
-    echo -e "  Статус бота: ${GREEN}работает${NC}"
-    echo ""
-    cur_ids="$(grep "^ALLOWED_IDS=" "$BOT_DIR/.env" 2>/dev/null | cut -d= -f2)"
-    if [ -n "$cur_ids" ]; then
-      echo -e "  Администратор(ы): ${WHITE}$cur_ids${NC}"
-    else
-      echo -e "  Администратор: ${YELLOW}не задан (бот доступен всем)${NC}"
-    fi
-    echo ""
-    echo -e "  1) Обновить файлы бота и перезапустить"
-    echo -e "  2) Изменить BOT_TOKEN"
-    echo -e "  3) Изменить администратора (ALLOWED_IDS)"
-    echo -e "  4) Остановить бота"
-    echo -e "  0) Назад"
-    read -r -p "  Выбор: " sub
-
-    case "$sub" in
-      1)
-        write_bot_files
-        install_bot_deps && systemctl restart "$SERVICE_NAME"
-        echo -e "${GREEN}[*] Бот обновлён и перезапущен.${NC}"
-        ;;
-      2)
-        echo -e "${YELLOW}Введите новый BOT_TOKEN:${NC}"
-        read -r tok
-        tok="$(echo "$tok" | tr -d '[:space:]')"
-        if [ -n "$tok" ]; then
-          sed -i "s/^BOT_TOKEN=.*/BOT_TOKEN=$tok/" "$BOT_DIR/.env"
-          chmod 600 "$BOT_DIR/.env"
-          systemctl restart "$SERVICE_NAME"
-          echo -e "${GREEN}[*] Токен обновлён, бот перезапущен.${NC}"
-        else
-          echo -e "${RED}Пустой токен, отмена.${NC}"
-        fi
-        ;;
-      3)
-        echo -e "${YELLOW}Введите Telegram ID администратора (или несколько через запятую):${NC}"
-        echo -e "  ${CYAN}Узнать ID: @userinfobot, @getmyid_bot или @RawDataBot${NC}"
-        echo -e "  ${CYAN}Оставьте пустым — бот будет доступен всем.${NC}"
-        read -r new_ids
-        new_ids="$(echo "$new_ids" | tr -d '[:space:]')"
-        sed -i "/^ALLOWED_IDS=/d" "$BOT_DIR/.env"
-        [ -n "$new_ids" ] && echo "ALLOWED_IDS=$new_ids" >> "$BOT_DIR/.env"
-        systemctl restart "$SERVICE_NAME"
-        if [ -n "$new_ids" ]; then
-          echo -e "${GREEN}[*] Администратор(ы): $new_ids. Перезапуск...${NC}"
-        else
-          echo -e "${GREEN}[*] Ограничение снято, бот доступен всем. Перезапуск...${NC}"
-        fi
-        ;;
-      4)
-        systemctl stop "$SERVICE_NAME"
-        echo -e "${YELLOW}Бот остановлен.${NC}"
-        ;;
-      *)
-        return
-        ;;
-    esac
-
-    pause "Нажмите Enter..."
-    return
-  fi
-
-  echo -e "  Статус бота: ${RED}не установлен / не запущен${NC}"
+# ── 7) Полное меню удаления ────────────────────────────────────────────────────
+menu_remove() {
+  clear
+  echo -e "${RED}╔══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${RED}║                     УДАЛЕНИЕ КОМПОНЕНТОВ                     ║${NC}"
+  echo -e "${RED}╚══════════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -e "  Бот позволяет управлять MTProxy из Telegram:"
-  echo -e "  установка, статус, ссылка, поделиться ключом и т.д."
+  echo -e "  ${YELLOW}1)${NC} Удалить только контейнер MTProxy"
+  echo -e "     (Docker и другие контейнеры останутся)"
   echo ""
-  read -r -p "  Установить бота? (y/n): " sub
-  [[ "$sub" =~ ^[Yy]$ ]] || return
-
-  echo -e "${GREEN}[*] Проверка Python...${NC}"
-  if ! command_exists python3; then
-    install_pkg python3 python3-pip || {
-      error "python3 не найден и установить его не удалось."
-      pause "Enter..."
-      return
-    }
-  fi
-
-  py_ver="$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "3")"
-  if ! python3 -m venv --help >/dev/null 2>&1; then
-    echo -e "${YELLOW}[*] Установка python${py_ver}-venv...${NC}"
-    install_pkg "python${py_ver}-venv" >/dev/null 2>&1 || true
-    install_pkg python3-venv >/dev/null 2>&1 || true
-    install_pkg python3-pip >/dev/null 2>&1 || true
-    python3 -m venv --help >/dev/null 2>&1 || {
-      echo -e "${RED}Не удалось установить venv. Выполните: apt install python${py_ver}-venv${NC}"
-      pause "Enter..."
-      return
-    }
-  fi
-
-  write_bot_files
-  install_bot_deps || {
-    pause "Enter..."
-    return
-  }
-
-  if [ ! -f "$BOT_DIR/.env" ]; then
-    echo ""
-    echo -e "${YELLOW}Введите BOT_TOKEN от @BotFather:${NC}"
-    echo -e "  ${CYAN}(Откройте @BotFather в Telegram → /newbot → скопируйте токен)${NC}"
-
-    token=""
-    while [ -z "$token" ]; do
-      read -r token
-      token="$(echo "$token" | tr -d '[:space:]')"
-      [ -z "$token" ] && echo -e "${RED}Токен не может быть пустым.${NC}"
-    done
-
-    echo ""
-    admin_ids="$(read_admin_ids_prompt)"
-    write_env_file "$token" "$admin_ids"
-
-    if [ -n "$admin_ids" ]; then
-      echo -e "${GREEN}[*] .env создан. Администратор(ы): $admin_ids${NC}"
-    else
-      echo -e "${GREEN}[*] .env создан. Бот доступен всем пользователям.${NC}"
-    fi
-  else
-    echo -e "${GREEN}[*] .env уже есть — используем существующий.${NC}"
-  fi
-
-  install_or_update_systemd_service
+  echo -e "  ${RED}2)${NC} Удалить контейнер MTProxy + Docker полностью"
+  echo -e "     ${RED}⚠  ВСЕ контейнеры и образы будут уничтожены!${NC}"
   echo ""
-  echo -e "${GREEN}[*] Telegram-бот установлен и запущен!${NC}"
-  echo -e "  Проверка: systemctl status $SERVICE_NAME"
-  echo -e "  Логи:     journalctl -u $SERVICE_NAME -f"
-  pause "  Нажмите Enter..."
-}
-
-remove_bot_artifacts() {
-  systemctl stop "$SERVICE_NAME" 2>/dev/null || true
-  systemctl disable "$SERVICE_NAME" 2>/dev/null || true
-  rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
-  systemctl daemon-reload 2>/dev/null || true
-  rm -rf "$BOT_DIR"
-}
-
-confirm_with_word() {
-  local prompt="$1"; shift
-  local words=("$@")
-  local word input
-  word="${words[$((RANDOM % ${#words[@]}))]}"
+  echo -e "  ${WHITE}0)${NC} Назад"
   echo ""
-  echo -e "  ${RED}$prompt${NC} ${WHITE}$word${NC}"
-  read -r -p "  >>> " input
-  [ "$input" = "$word" ]
+  local choice
+  read -p "  Выбор: " choice
+
+  case $choice in
+    1) remove_container_only ;;
+    2) remove_with_docker ;;
+    *) return ;;
+  esac
 }
 
 remove_container_only() {
-  clear_screen
-  print_header "$YELLOW" "Удаление контейнера MTProxy"
+  clear
+  echo -e "${YELLOW}╔══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${YELLOW}║          Удаление контейнера MTProxy                        ║${NC}"
+  echo -e "${YELLOW}╚══════════════════════════════════════════════════════════════╝${NC}"
   echo ""
   echo -e "  Будет удалено:"
   echo -e "    • Контейнер ${WHITE}$CONTAINER_NAME${NC}"
   echo -e "    • Telegram-бот (сервис ${WHITE}$SERVICE_NAME${NC})"
   echo -e "    • Файлы бота (${WHITE}$BOT_DIR${NC})"
-  echo -e "    • Скрипт ${WHITE}$SELF_INSTALL_PATH${NC}"
+  echo -e "    • Скрипт ${WHITE}/usr/local/bin/gotelegram${NC}"
   echo ""
   echo -e "  Docker и другие контейнеры ${GREEN}НЕ будут затронуты${NC}."
   echo ""
 
+  # Подтверждение 1
   local yn
-  read -r -p "  Вы уверены? (y/N): " yn
-  [[ "$yn" =~ ^[Yy]$ ]] || {
+  read -p "  Вы уверены? (y/N): " yn
+  if [ "$yn" != "y" ] && [ "$yn" != "Y" ]; then
     echo -e "  ${GREEN}Отменено.${NC}"
-    pause "  Нажмите Enter..."
+    read -p "  Нажмите Enter..."
     return
-  }
+  fi
 
-  confirm_with_word "Для подтверждения введите слово:" "УДАЛИТЬ" "СТЕРЕТЬ" "ПРОКСИ" "ОЧИСТКА" "ФИНАЛ" "СБРОС" || {
+  # Подтверждение 2 — случайное слово
+  local words=("УДАЛИТЬ" "СТЕРЕТЬ" "ПРОКСИ" "ОЧИСТКА" "ФИНАЛ" "СБРОС")
+  local confirm_word="${words[$((RANDOM % ${#words[@]}))]}"
+  echo ""
+  echo -e "  ${RED}Для подтверждения введите слово:${NC} ${WHITE}${confirm_word}${NC}"
+  local input_word
+  read -p "  >>> " input_word
+  if [ "$input_word" != "$confirm_word" ]; then
     echo -e "  ${GREEN}Слово не совпало. Удаление отменено.${NC}"
-    pause "  Нажмите Enter..."
+    read -p "  Нажмите Enter..."
     return
-  }
+  fi
 
   echo ""
+  # Удаление
   spinner_start "Остановка и удаление контейнера..."
-  docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
-  docker rm "$CONTAINER_NAME" >/dev/null 2>&1 || true
+  docker stop "$CONTAINER_NAME" &>/dev/null
+  docker rm "$CONTAINER_NAME" &>/dev/null
   spinner_stop
-  success "Контейнер удалён"
+  echo -e "  ${GREEN}✓${NC} Контейнер удалён"
 
   spinner_start "Остановка Telegram-бота..."
-  remove_bot_artifacts
+  systemctl stop "$SERVICE_NAME" 2>/dev/null
+  systemctl disable "$SERVICE_NAME" 2>/dev/null
+  rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
+  systemctl daemon-reload 2>/dev/null
   spinner_stop
-  success "Сервис бота удалён"
+  echo -e "  ${GREEN}✓${NC} Сервис бота удалён"
 
-  rm -f "$SELF_INSTALL_PATH"
-  success "Скрипт gotelegram удалён"
+  rm -rf "$BOT_DIR"
+  echo -e "  ${GREEN}✓${NC} Файлы бота удалены"
+
+  rm -f /usr/local/bin/gotelegram
+  echo -e "  ${GREEN}✓${NC} Скрипт gotelegram удалён"
 
   echo ""
   echo -e "${GREEN}══════════════════════════════════════════════════${NC}"
   echo -e "${GREEN}  Удаление завершено. Docker остался на месте.${NC}"
   echo -e "${GREEN}══════════════════════════════════════════════════${NC}"
-  pause "  Нажмите Enter..."
+  read -p "  Нажмите Enter..."
 }
 
 remove_with_docker() {
-  clear_screen
-  print_header "$RED" "⚠ ПОЛНОЕ УДАЛЕНИЕ: MTProxy + Docker + всё ⚠"
+  clear
+  echo -e "${RED}╔══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${RED}║     ⚠  ПОЛНОЕ УДАЛЕНИЕ: MTProxy + Docker + всё ⚠           ║${NC}"
+  echo -e "${RED}╚══════════════════════════════════════════════════════════════╝${NC}"
   echo ""
   echo -e "  ${RED}ВНИМАНИЕ! Будет удалено ВСЁ:${NC}"
   echo -e "    • Контейнер ${WHITE}$CONTAINER_NAME${NC}"
@@ -1208,157 +1143,144 @@ remove_with_docker() {
   echo -e "    • ${RED}ВСЕ Docker-контейнеры, образы и тома${NC}"
   echo ""
 
+  # Показываем что ещё есть в Docker
   local other_containers
-  other_containers="$(docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}' 2>/dev/null | grep -v "^${CONTAINER_NAME}" || true)"
+  other_containers=$(docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Status}}' 2>/dev/null | grep -v "^${CONTAINER_NAME}")
   if [ -n "$other_containers" ]; then
-    echo -e "  ${RED}⚠ На сервере есть ДРУГИЕ контейнеры, которые тоже будут уничтожены:${NC}"
+    echo -e "  ${RED}⚠  На сервере есть ДРУГИЕ контейнеры, которые тоже будут уничтожены:${NC}"
     echo -e "  ${RED}────────────────────────────────────────────────────────────────${NC}"
-    while IFS= read -r line; do
+    echo "$other_containers" | while IFS= read -r line; do
       echo -e "    ${WHITE}$line${NC}"
-    done <<< "$other_containers"
+    done
     echo -e "  ${RED}────────────────────────────────────────────────────────────────${NC}"
     echo ""
   fi
 
+  # Подтверждение 1
   local yn
   echo -e "  ${RED}Это действие НЕОБРАТИМО.${NC}"
-  read -r -p "  Вы точно уверены? (y/N): " yn
-  [[ "$yn" =~ ^[Yy]$ ]] || {
+  read -p "  Вы точно уверены? (y/N): " yn
+  if [ "$yn" != "y" ] && [ "$yn" != "Y" ]; then
     echo -e "  ${GREEN}Отменено.${NC}"
-    pause "  Нажмите Enter..."
+    read -p "  Нажмите Enter..."
     return
-  }
+  fi
 
-  confirm_with_word "████ Для подтверждения введите:" "УНИЧТОЖИТЬ" "ПОЛНЫЙ-СБРОС" "СТЕРЕТЬ-ВСЁ" "ПОДТВЕРЖДАЮ" "DOCKER-УДАЛИТЬ" "ТОЧНО-ДА" || {
+  # Подтверждение 2 — случайное слово
+  local words=("УНИЧТОЖИТЬ" "ПОЛНЫЙ-СБРОС" "СТЕРЕТЬ-ВСЁ" "ПОДТВЕРЖДАЮ" "DOCKER-УДАЛИТЬ" "ТОЧНО-ДА")
+  local confirm_word="${words[$((RANDOM % ${#words[@]}))]}"
+  echo ""
+  echo -e "  ${RED}████████████████████████████████████████████████████████████${NC}"
+  echo -e "  ${RED}██${NC}  Для подтверждения введите:  ${WHITE}${confirm_word}${NC}"
+  echo -e "  ${RED}████████████████████████████████████████████████████████████${NC}"
+  local input_word
+  read -p "  >>> " input_word
+  if [ "$input_word" != "$confirm_word" ]; then
     echo -e "  ${GREEN}Слово не совпало. Удаление отменено.${NC}"
-    pause "  Нажмите Enter..."
+    read -p "  Нажмите Enter..."
     return
-  }
+  fi
 
   echo ""
+  # Удаление MTProxy
   spinner_start "Удаление контейнера MTProxy..."
-  docker stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
-  docker rm "$CONTAINER_NAME" >/dev/null 2>&1 || true
+  docker stop "$CONTAINER_NAME" &>/dev/null
+  docker rm "$CONTAINER_NAME" &>/dev/null
   spinner_stop
-  success "Контейнер MTProxy удалён"
+  echo -e "  ${GREEN}✓${NC} Контейнер MTProxy удалён"
 
+  # Удаление бота
   spinner_start "Удаление Telegram-бота..."
-  remove_bot_artifacts
+  systemctl stop "$SERVICE_NAME" 2>/dev/null
+  systemctl disable "$SERVICE_NAME" 2>/dev/null
+  rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
+  systemctl daemon-reload 2>/dev/null
+  rm -rf "$BOT_DIR"
   spinner_stop
-  success "Telegram-бот удалён"
+  echo -e "  ${GREEN}✓${NC} Telegram-бот удалён"
 
+  # Удаление всех контейнеров Docker
   spinner_start "Остановка всех контейнеров Docker..."
-  docker stop $(docker ps -aq) >/dev/null 2>&1 || true
-  docker rm $(docker ps -aq) >/dev/null 2>&1 || true
+  docker stop $(docker ps -aq) &>/dev/null
+  docker rm $(docker ps -aq) &>/dev/null
   spinner_stop
-  success "Все контейнеры остановлены и удалены"
+  echo -e "  ${GREEN}✓${NC} Все контейнеры остановлены и удалены"
 
+  # Удаление Docker
   spinner_start "Удаление Docker Engine..."
-  systemctl stop docker 2>/dev/null || true
-  if command_exists apt-get; then
-    apt-get purge -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null 2>&1 || true
-    apt-get autoremove -y -qq >/dev/null 2>&1 || true
-  elif command_exists dnf; then
-    dnf remove -y docker-ce docker-ce-cli containerd.io >/dev/null 2>&1 || true
-  elif command_exists yum; then
-    yum remove -y docker-ce docker-ce-cli containerd.io >/dev/null 2>&1 || true
+  systemctl stop docker 2>/dev/null
+  if command -v apt-get &>/dev/null; then
+    apt-get purge -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 2>/dev/null
+    apt-get autoremove -y -qq 2>/dev/null
+  elif command -v dnf &>/dev/null; then
+    dnf remove -y docker-ce docker-ce-cli containerd.io 2>/dev/null
+  elif command -v yum &>/dev/null; then
+    yum remove -y docker-ce docker-ce-cli containerd.io 2>/dev/null
   fi
   rm -rf /var/lib/docker /var/lib/containerd /etc/docker
   spinner_stop
-  success "Docker полностью удалён"
+  echo -e "  ${GREEN}✓${NC} Docker полностью удалён"
 
-  rm -f "$SELF_INSTALL_PATH"
-  success "Скрипт gotelegram удалён"
+  # Удаление скрипта
+  rm -f /usr/local/bin/gotelegram
+  echo -e "  ${GREEN}✓${NC} Скрипт gotelegram удалён"
 
   echo ""
   echo -e "${GREEN}══════════════════════════════════════════════════${NC}"
   echo -e "${GREEN}  Полное удаление завершено.${NC}"
   echo -e "${GREEN}══════════════════════════════════════════════════${NC}"
   echo -e "  Для повторной установки используйте команду curl."
-  pause "  Нажмите Enter для выхода..."
+  read -p "  Нажмите Enter для выхода..."
   exit 0
 }
 
-menu_remove() {
-  clear_screen
-  print_header "$RED" "УДАЛЕНИЕ КОМПОНЕНТОВ"
-  echo ""
-  echo -e "  ${YELLOW}1)${NC} Удалить только контейнер MTProxy"
-  echo -e "     (Docker и другие контейнеры останутся)"
-  echo ""
-  echo -e "  ${RED}2)${NC} Удалить контейнер MTProxy + Docker полностью"
-  echo -e "     ${RED}⚠ ВСЕ контейнеры и образы будут уничтожены!${NC}"
-  echo ""
-  echo -e "  ${WHITE}0)${NC} Назад"
-  echo ""
-
-  local choice
-  read -r -p "  Выбор: " choice
-  case "$choice" in
-    1) remove_container_only ;;
-    2) remove_with_docker ;;
-    *) return ;;
-  esac
-}
-
-restart_proxy() {
-  if proxy_is_running; then
-    docker restart "$CONTAINER_NAME" >/dev/null 2>&1 && echo -e "${GREEN}Перезапущен.${NC}" || echo -e "${RED}Ошибка.${NC}"
-  else
-    echo -e "${RED}Прокси не запущен.${NC}"
-  fi
-  pause "Нажмите Enter..."
-}
-
-show_proxy_logs() {
-  if proxy_is_running; then
-    docker logs --tail 50 "$CONTAINER_NAME" 2>&1
-  else
-    echo -e "${RED}Прокси не запущен.${NC}"
-  fi
-  pause "Нажмите Enter..."
-}
-
+# ── Выход ────────────────────────────────────────────────────────────────────
 show_exit() {
   clear
   show_config
+  echo ""
+  echo -e "${MAGENTA}Поддержка автора (CloudTips):${NC}"
+  echo -e "  $TIP_LINK"
+  echo -e "  YouTube: https://www.youtube.com/@antenkaru"
+  if command -v qrencode &>/dev/null; then
+    qrencode -t ANSIUTF8 "$TIP_LINK"
+  fi
   exit 0
 }
 
-usage() {
-  echo "Usage: $0 [install|status|bot|remove|promo]" >&2
-}
+# ══════════════════════════════════════════════════════════════════════════════
+# ██  СТАРТ СКРИПТА
+# ══════════════════════════════════════════════════════════════════════════════
 
-handle_cli_command() {
-  [ $# -eq 0 ] && return 1
+install_base_deps
 
-  case "$1" in
-    install) menu_install ;;
-    status) show_config ;;
-    bot) menu_setup_bot ;;
-    remove) menu_remove ;;
-    promo) show_promo ;;
-    *) usage; return 1 ;;
-  esac
-  return 0
-}
+# Копируем себя в /usr/local/bin/gotelegram (если запущены из другого места)
+SELF="$(realpath "$0")"
+if [ "$SELF" != "/usr/local/bin/gotelegram" ]; then
+  cp "$SELF" /usr/local/bin/gotelegram && chmod +x /usr/local/bin/gotelegram
+fi
 
-show_main_menu() {
+show_promo
+
+# ── Главное меню (цикл) ─────────────────────────────────────────────────────
+while true; do
   echo ""
-  print_header "$MAGENTA" "GoTelegram Manager (by anten-ka)"
+  echo -e "${MAGENTA}╔══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${MAGENTA}║            GoTelegram Manager (by anten-ka)                  ║${NC}"
+  echo -e "${MAGENTA}╚══════════════════════════════════════════════════════════════╝${NC}"
 
+  # Статус прокси
   if proxy_is_running; then
     echo -e "  Прокси: ${GREEN}работает${NC}"
   else
     echo -e "  Прокси: ${RED}не запущен${NC}"
   fi
-
-  if bot_is_active; then
+  # Статус бота
+  if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
     echo -e "  Telegram-бот: ${GREEN}работает${NC}"
   else
     echo -e "  Telegram-бот: ${YELLOW}не настроен${NC}"
   fi
-
   echo ""
   echo -e "  ${GREEN}1)${NC} Установить / Обновить прокси"
   echo -e "  ${GREEN}2)${NC} Показать данные подключения"
@@ -1369,40 +1291,30 @@ show_main_menu() {
   echo -e "  ${RED}7)${NC} Удалить (полное меню удаления)"
   echo -e "  ${WHITE}0)${NC} Выход"
   echo ""
-}
-
-main_loop() {
-  local choice
-  while true; do
-    show_main_menu
-    read -r -p "  Пункт: " choice
-    case "$choice" in
-      1) menu_install ;;
-      2) clear_screen; show_config; pause "Нажмите Enter..." ;;
-      3) menu_setup_bot ;;
-      4) restart_proxy ;;
-      5) show_proxy_logs ;;
-      6) show_promo ;;
-      7) menu_remove ;;
-      0) show_exit ;;
-      *) echo -e "${RED}Неверный ввод.${NC}" ;;
-    esac
-  done
-}
-
-main() {
-  require_root
-  install_base_deps || exit 1
-  ensure_self_installed
-
-  if handle_cli_command "$@"; then
-    exit 0
-  elif [ $# -gt 0 ]; then
-    exit 1
-  fi
-
-  show_promo
-  main_loop
-}
-
-main "$@"
+  read -p "  Пункт: " m_idx
+  case $m_idx in
+    1) menu_install ;;
+    2) clear; show_config; read -p "Нажмите Enter..." ;;
+    3) menu_setup_bot ;;
+    4)
+      if proxy_is_running; then
+        docker restart "$CONTAINER_NAME" && echo -e "${GREEN}Перезапущен.${NC}" || echo -e "${RED}Ошибка.${NC}"
+      else
+        echo -e "${RED}Прокси не запущен.${NC}"
+      fi
+      read -p "Нажмите Enter..."
+      ;;
+    5)
+      if proxy_is_running; then
+        docker logs --tail 50 "$CONTAINER_NAME" 2>&1
+      else
+        echo -e "${RED}Прокси не запущен.${NC}"
+      fi
+      read -p "Нажмите Enter..."
+      ;;
+    6) show_promo ;;
+    7) menu_remove ;;
+    0) show_exit ;;
+    *) echo -e "${RED}Неверный ввод.${NC}" ;;
+  esac
+done
